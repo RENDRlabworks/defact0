@@ -126,3 +126,27 @@ bd prime                # Refresh Beads context
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md for details and anti-patterns.
 <!-- END BEADS CODEX SETUP -->
+
+## Build & Test
+
+```bash
+npm install
+npm run dev        # http://localhost:5173
+npm test           # vitest unit tests (pure logic in src/lib)
+npm run build      # typecheck + production build
+```
+
+## Architecture Overview
+
+React + TypeScript + Vite app on top of tldraw 5. Everything (cards, frames, notes, drawings, tags, chat sessions) lives in the tldraw store, persisted to IndexedDB via `persistenceKey="defact0"`; image blobs live in tldraw's IndexedDB asset store. JSON export is tldraw's `.tldr` format with images inlined as data URLs.
+
+- `src/shapes/` custom `card` shape (image + text snippet + tags + session). `handledAssetTypes = ['image']` makes dropped images become cards.
+- `src/lib/` logic. Pure, unit-tested modules: `arrange.ts`, `search.ts`, `organize.ts`, `detect.ts`. Editor-bound: `canvas.ts`, `content.ts` (drop/paste handlers), `arrangeActions.ts`, `similarity.ts`, `sessions.ts` (stored in document meta), `exportImport.ts`, `uiState.ts` (tldraw atoms).
+- `src/ui/` panels, dialogs, preview modal, tldraw UI overrides (actions, shortcuts, menus).
+
+## Conventions & Patterns
+
+- Tags/session/createdAt are card props; for other shape types they live in `shape.meta`. Use the helpers in `src/lib/canvas.ts` rather than reading them directly.
+- New user actions go in `src/ui/overrides.tsx` as tldraw actions so they get a shortcut, menu entry and a row in the shortcuts dialog.
+- Keep pure logic free of tldraw imports so it stays testable under `vitest` in node.
+- In dev, `window.editor` exposes the tldraw editor for debugging.
