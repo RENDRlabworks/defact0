@@ -2,7 +2,7 @@
 
 This file provides instructions and context for AI coding agents working on this project.
 
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
+<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:46cd31e7 -->
 ## Beads Issue Tracker
 
 This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
@@ -46,6 +46,7 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
    # Team-maintainer opt-in only, unless current instructions forbid it:
    git pull --rebase
+   bd dolt push
    git push
    git status
    ```
@@ -60,18 +61,33 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ## Build & Test
 
-_Add your build and test commands here_
-
 ```bash
-# Example:
-# npm install
-# npm test
+npm install
+npm run dev        # http://localhost:5173
+npm test           # vitest unit tests (pure logic in src/lib)
+npm run build      # typecheck + production build
 ```
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+React + TypeScript + Vite. The canvas engine is our own code in `src/engine/` (no canvas library). The only runtime dependency besides React is `perfect-freehand` for pen strokes.
+
+- `src/engine/` the canvas engine.
+  - `types.ts` document model: shapes (`card`, `note`, `frame`, `draw`), assets, chat sessions. Plain JSON.
+  - `Editor.ts` the engine API: immutable doc store, undo/redo (`run()` groups changes, `beginInteraction()`/`endInteraction()` for drags), selection, z-order, frames (children keep page coordinates, moving a frame moves them), camera, hit testing.
+  - `geometry.ts` pure math: camera transforms, rotated-box hit tests, resize/rotate. Unit tested.
+  - `interaction.ts` pointer/wheel/touch state machine (select, marquee, move, resize, rotate, pan, pinch, draw, note, frame).
+  - `render/` DOM rendering: `Canvas` (world layer transformed by the camera), `ShapeViews` (memoized per shape), `Overlay` (screen-space selection handles and frame labels), `Minimap`.
+  - `persistence.ts` / `assets.ts` IndexedDB for the doc and image blobs. `exportImage.ts` renders PNGs with canvas 2D.
+  - `store.ts` tiny observable store + `useStore` hook; `react.tsx` context and `useEditor`/`useUi`/`useDoc`.
+- `src/lib/` app logic. Pure and unit tested: `arrange.ts`, `search.ts`, `organize.ts`, `detect.ts`. Editor-bound: `canvas.ts`, `clipboard.ts` (paste/drop/copy), `arrangeActions.ts`, `similarity.ts`, `sessions.ts`, `exportImport.ts`, `boot.ts` (load + autosave), `uiState.ts` (panels, dialogs, toasts).
+- `src/ui/` app chrome: `actions.ts` (single registry for shortcuts, menus and the shortcuts dialog), `Chrome.tsx` (toolbar, menus, context menu, zoom/minimap, toasts), panels, dialogs, preview modal.
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+- Every shape has `tags`, `sessionId`, `createdAt` and `parentId` (frame). Shapes in frames keep page coordinates.
+- Mutate through `Editor` methods only. Wrap multi-step changes in `editor.run()` so they undo as one step.
+- New user commands go in `src/ui/actions.ts`; they get a shortcut, menu entries and a row in the shortcuts dialog automatically.
+- Selectors passed to `useUi`/`useDoc` may return new arrays; results are compared shallowly.
+- Keep pure logic free of DOM and editor imports so it stays testable under `vitest` in node.
+- In dev, `window.editor` exposes the editor for debugging.
