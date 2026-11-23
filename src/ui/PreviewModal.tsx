@@ -1,29 +1,27 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useEditor, useImageOrVideoAsset, useValue, type TLAssetId, type TLShapeId } from 'tldraw'
-import { isCard } from '../lib/canvas'
+import { useAssetUrl } from '../engine/assets'
+import { useDoc, useEditor } from '../engine/react'
+import type { CardShape } from '../engine/types'
+import { cardSizeForText } from '../lib/canvas'
 import { detectCode } from '../lib/detect'
 import { parseTags } from '../lib/search'
-import { getSessions } from '../lib/sessions'
-import { ui } from '../lib/uiState'
-import { CARD_TYPE, type CardShape } from '../shapes/cardTypes'
-import { cardSizeForText } from '../shapes/CardShapeUtil'
+import { app, useApp } from '../lib/uiState'
 import { formatDate, Modal } from './common'
 import { Icon } from './icons'
 
 /** Large preview + editor for a card. Opens on double-click, Enter or P. */
 export function PreviewModal() {
-  const editor = useEditor()
-  const id = useValue('previewId', () => ui.previewId.get(), [])
-  const shape = useValue('preview shape', () => (id ? editor.getShape(id as TLShapeId) : undefined), [editor, id])
-  if (!id || !isCard(shape)) return null
+  const id = useApp((s) => s.previewId)
+  const shape = useDoc((d) => (id ? d.shapes[id] : undefined))
+  if (!id || shape?.type !== 'card') return null
   return <PreviewInner key={shape.id} shape={shape} />
 }
 
 function PreviewInner({ shape }: { shape: CardShape }) {
   const editor = useEditor()
-  const p = shape.props
-  const { url } = useImageOrVideoAsset({ shapeId: shape.id, assetId: (p.assetId as TLAssetId) ?? null, width: 2400 })
-  const sessions = useValue('sessions', () => getSessions(editor), [editor])
+  const p = shape
+  const url = useAssetUrl(p.assetId)
+  const sessions = useDoc((d) => d.sessions)
   const [title, setTitle] = useState(p.title)
   const [text, setText] = useState(p.text)
   const [tags, setTags] = useState(p.tags.join(', '))
@@ -36,9 +34,9 @@ function PreviewInner({ shape }: { shape: CardShape }) {
   const order = useMemo(
     () =>
       editor
-        .getCurrentPageShapes()
-        .filter(isCard)
-        .sort((a, b) => a.props.createdAt - b.props.createdAt)
+        .getShapes()
+        .filter((s): s is CardShape => s.type === 'card')
+        .sort((a, b) => a.createdAt - b.createdAt)
         .map((s) => s.id),
     [editor]
   )
@@ -55,7 +53,7 @@ function PreviewInner({ shape }: { shape: CardShape }) {
   const save = () => {
     if (!dirty) return
     const nextText = text
-    const patch: Partial<CardShape['props']> = {
+    const patch: Partial<CardShape> = {
       title,
       text: nextText,
       tags: parseTags(tags),
@@ -67,20 +65,19 @@ function PreviewInner({ shape }: { shape: CardShape }) {
     if (!p.assetId && !p.text.trim() && nextText.trim()) Object.assign(patch, cardSizeForText(nextText))
     // An image card that just got text: make room under the image.
     if (p.assetId && !p.text.trim() && nextText.trim()) patch.h = p.h + Math.min(220, cardSizeForText(nextText).h - 20)
-    editor.markHistoryStoppingPoint('edit card')
-    editor.updateShape<CardShape>({ id: shape.id, type: CARD_TYPE, props: patch })
+    editor.updateShape({ id: shape.id, ...patch })
   }
 
   const close = () => {
     save()
-    ui.previewId.set(null)
+    app.update({ previewId: null })
   }
   const go = (delta: number) => {
     save()
     const next = order[idx + delta]
     if (next) {
-      editor.select(next)
-      ui.previewId.set(next)
+      editor.select([next])
+      app.update({ previewId: next })
     }
   }
 

@@ -1,6 +1,6 @@
 # defact0
 
-A local-first infinite canvas for the screenshots, diagrams, code snippets and other visual output that Claude Code produces during your chats. Built with React, TypeScript and [tldraw](https://tldraw.dev).
+A local-first infinite canvas for the screenshots, diagrams, code snippets and other visual output that Claude Code produces during your chats. Built with React and TypeScript on a canvas engine written for this project.
 
 Nothing leaves your browser: the canvas and every image are stored in IndexedDB.
 
@@ -13,55 +13,65 @@ npm run dev
 
 Open http://localhost:5173. Other scripts: `npm test` (unit tests), `npm run build` (typecheck and production build), `npm run preview`.
 
-tldraw runs without a license on `localhost`. To host it anywhere else, get a tldraw license key and set `VITE_TLDRAW_LICENSE_KEY` in a `.env` file.
+It's a static site, so `npm run build` produces a `dist/` folder you can host anywhere (Vercel, Netlify, Cloudflare Pages). No license key or server is needed.
 
 ## What you can do
 
-**Canvas.** Pan with space+drag, the hand tool, or the trackpad; zoom with the wheel or pinch. A minimap sits in the bottom-left corner.
+**Canvas.** Pan with space+drag, middle-drag, the hand tool (H) or two-finger scroll; zoom with the mouse wheel, pinch, or the zoom controls. The minimap in the bottom-left shows the whole canvas; click or drag it to move around.
 
-**Cards.** Drop images or code/text files from your desktop, or paste screenshots and text with ⌘V. Images become image cards; code files and pasted text become snippet cards, with the language detected automatically. A card can hold an image, text, or both. Cards move, resize and rotate like any tldraw shape.
+**Cards.** Drop images or code/text files from your desktop, paste screenshots and text with ⌘V, or insert files with ⌘U. Images become image cards; code files and pasted text become snippet cards with the language detected. A card can hold an image, text, or both. Select, move, resize (Shift keeps the aspect ratio) and rotate (Shift snaps to 15°) any shape.
 
 **Preview and edit.** Double-click a card (or press Enter or P) to open a large preview where you can edit its title, notes or code, tags and chat session. Use ← and → to step through cards.
 
-**Frames, notes, drawing.** tldraw's own tools: frame (F, or ⌘⌥G to frame the selection), sticky note (N), draw (D), text (T), arrows (A).
+**Frames, notes, drawing.** Frame tool (F) or ⌘G to put the selection in a frame; drag a frame by its name to move everything in it, and double-click the name to rename it. Sticky notes (N) and freehand drawing (D) come with color and stroke options.
 
-**Arrange.** After dropping several items at once, a toast offers to arrange them in a grid or by visual similarity. You can do the same for any selection from the context menu or with shortcuts. Similarity uses a small color and layout fingerprint of each image and k-means clustering, so no ML model is needed.
+**Arrange.** After adding several items at once, a toast offers to arrange them in a grid or by visual similarity. The same commands are in the context menu and on shortcuts. Similarity compares a small color and layout fingerprint of each image and groups similar ones (k-means), with no ML model.
 
 **Tags.** Shift+T tags the selection (for example "auth flow", "bug", "frontend", "API design"). Tags show on cards and work as search filters.
 
-**Search.** ⌘K opens full-text search across card titles and snippets, sticky notes, text and frame names, with filters for tag, date range and chat session. Click a result to jump to it, or frame all the results.
+**Search.** ⌘K opens full-text search across card titles and snippets, sticky notes and frame names, with filters for tag, date range and chat session. Click a result to jump to it, or frame all the results.
 
 **Chat sessions.** Group cards by the Claude Code conversation they came from. Create a session with a name and the session URL, assign cards with Shift+C, then jump back to the cards or open the chat from the Sessions panel (Shift+S). Sessions are listed as a timeline by day.
 
 **AI organize.** Shift+I takes an instruction such as "group all the authentication related screenshots together", finds the matching items and moves them into a new frame. It currently runs a local keyword and synonym matcher (`src/lib/organize.ts`); `planOrganize()` is the place to swap in a real LLM call.
 
-**Export.** ⌘⇧E exports the selection as a PNG; the download button exports the viewport when nothing is selected. ⌘⇧J exports the whole canvas as JSON with images inlined. Import it again from the main menu under Export.
+**Export.** ⌘⇧E exports the selection as a PNG; the download button exports the viewport when nothing is selected. ⌘⇧J exports the whole canvas as JSON with images inlined; import it again from the menu.
+
+**Light or dark.** Dark by default; ⌘⇧L or the menu switches.
 
 ## Keyboard shortcuts
 
+Press `?` in the app for the full list.
+
 | Action | Shortcut |
 | --- | --- |
+| Select, hand, draw, note, frame tools | V, H, D, N, F |
+| New snippet card | C |
+| Insert images or files | ⌘U |
 | Search | ⌘K |
 | Sessions panel | Shift+S |
-| New snippet card | C |
-| Preview selected card | P, Enter, or double-click |
+| Open / edit selected | P or Enter, or double-click |
 | Tag selection | Shift+T |
 | Assign to chat session | Shift+C |
 | Arrange in grid | Shift+A |
 | Arrange by similarity | Shift+M |
 | Cluster into frames by similarity | Shift+Alt+M |
+| Group into frame / remove frame | ⌘G / ⌘⇧G |
 | AI organize | Shift+I |
+| Undo / redo | ⌘Z / ⌘⇧Z |
+| Duplicate, delete | ⌘D, ⌫ |
+| Copy, cut, paste | ⌘C, ⌘X, ⌘V |
+| Bring forward / send backward | ] / [ (Shift for front/back) |
+| Zoom in / out / 100% / fit / selection | = / - / Shift+0 / Shift+1 / Shift+2 |
 | Export selection as PNG | ⌘⇧E |
 | Export canvas as JSON | ⌘⇧J |
-| Delete, duplicate, group, frame selection | ⌫, ⌘D, ⌘G, ⌘⌥G |
-
-Press ⌘/ for the full list, tldraw's own shortcuts included.
+| Toggle dark mode | ⌘⇧L |
 
 ## Project layout
 
 ```
 src/
-  shapes/   the custom "card" shape
-  lib/      search, arrange, similarity, sessions, drop/paste handling, export
-  ui/       panels, dialogs, preview modal, tldraw menu and shortcut overrides
+  engine/   the canvas engine: document model, editor API, geometry, interactions, rendering, storage
+  lib/      app features: search, arrange, similarity, sessions, clipboard and drop, export
+  ui/       toolbar, menus, panels, dialogs, preview modal, shortcut registry
 ```

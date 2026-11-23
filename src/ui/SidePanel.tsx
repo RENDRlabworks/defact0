@@ -1,17 +1,16 @@
 import { useMemo, useState } from 'react'
-import { useEditor, useValue, type TLShapeId } from 'tldraw'
-import { buildIndex, frameShapes, isCard, setSession } from '../lib/canvas'
+import { useDerived, useDoc, useEditor, useUi } from '../engine/react'
+import { buildIndex, setSession } from '../lib/canvas'
 import { isQueryEmpty, search, tagCounts, type SearchItem, type SearchQuery } from '../lib/search'
 import {
   createSession,
   deleteSession,
-  getSessions,
   guessSessionName,
   sessionColor,
   updateSession,
   type ChatSession,
 } from '../lib/sessions'
-import { ui } from '../lib/uiState'
+import { app, useApp } from '../lib/uiState'
 import { formatDate, shield, useJumpTo } from './common'
 import { Icon } from './icons'
 
@@ -38,24 +37,23 @@ function fromInputDate(v: string, endOfDay = false): number | null {
 
 /** Reactive index of everything searchable on the current page. */
 function useIndex(): SearchItem[] {
-  const editor = useEditor()
-  return useValue('d0 index', () => buildIndex(editor), [editor])
+  return useDerived(buildIndex)
 }
 
 export function SidePanel() {
-  const panel = useValue('panel', () => ui.panel.get(), [])
+  const panel = useApp((s) => s.panel)
   if (!panel) return null
   return (
     <aside className="d0-panel" {...shield}>
       <div className="d0-panel__tabs">
-        <button className={panel === 'search' ? 'is-active' : ''} onClick={() => ui.panel.set('search')}>
+        <button className={panel === 'search' ? 'is-active' : ''} onClick={() => app.update({ panel: 'search' })}>
           {Icon.search} Search
         </button>
-        <button className={panel === 'sessions' ? 'is-active' : ''} onClick={() => ui.panel.set('sessions')}>
+        <button className={panel === 'sessions' ? 'is-active' : ''} onClick={() => app.update({ panel: 'sessions' })}>
           {Icon.sessions} Sessions
         </button>
         <span className="d0-spacer" />
-        <button className="d0-icon-btn" onClick={() => ui.panel.set(null)} title="Close panel" aria-label="Close panel">
+        <button className="d0-icon-btn" onClick={() => app.update({ panel: null })} title="Close panel" aria-label="Close panel">
           {Icon.close}
         </button>
       </div>
@@ -69,10 +67,10 @@ export function SidePanel() {
 function SearchView() {
   const editor = useEditor()
   const index = useIndex()
-  const q = useValue('query', () => ui.query.get(), [])
-  const sessions = useValue('sessions', () => getSessions(editor), [editor])
+  const q = useApp((s) => s.query)
+  const sessions = useDoc((d) => d.sessions)
   const jumpTo = useJumpTo()
-  const setQ = (patch: Partial<SearchQuery>) => ui.query.set({ ...ui.query.get(), ...patch })
+  const setQ = (patch: Partial<SearchQuery>) => app.update({ query: { ...app.get().query, ...patch } })
   const results = useMemo(() => search(index, q), [index, q])
   const tags = useMemo(() => tagCounts(index), [index])
   const empty = isQueryEmpty(q)
@@ -80,7 +78,7 @@ function SearchView() {
   const preset = (days: number | null) =>
     setQ(days == null ? { from: null, to: null } : { from: startOfDay(now - (days - 1) * DAY), to: null })
 
-  const resultIds = results.map((r) => r.id as TLShapeId)
+  const resultIds = results.map((r) => r.id)
 
   return (
     <div className="d0-panel__content">
@@ -91,8 +89,8 @@ function SearchView() {
         value={q.text}
         onChange={(e) => setQ({ text: e.target.value })}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && results[0]) jumpTo([results[0].id as TLShapeId])
-          if (e.key === 'Escape') ui.panel.set(null)
+          if (e.key === 'Enter' && results[0]) jumpTo([results[0].id])
+          if (e.key === 'Escape') app.update({ panel: null })
         }}
       />
 
@@ -170,8 +168,7 @@ function SearchView() {
                 const name = q.text.trim() || q.tags.join(', ') || 'Search results'
                 const ids = resultIds.filter((id) => editor.getShape(id)?.type !== 'frame')
                 if (!ids.length) return
-                editor.markHistoryStoppingPoint('frame results')
-                const frameId = frameShapes(editor, ids, name)
+                const frameId = editor.frameShapes(ids, name)
                 if (frameId) jumpTo([frameId])
               }}
             >
@@ -180,7 +177,7 @@ function SearchView() {
           </>
         )}
         {!empty && (
-          <button className="d0-link-btn" onClick={() => ui.query.set({ text: '', tags: [], from: null, to: null, sessionId: null })}>
+          <button className="d0-link-btn" onClick={() => app.update({ query: { text: '', tags: [], from: null, to: null, sessionId: null } })}>
             Clear
           </button>
         )}
@@ -188,7 +185,7 @@ function SearchView() {
 
       <ul className="d0-results">
         {(empty ? [...index].sort((a, b) => b.createdAt - a.createdAt) : results).slice(0, 200).map((r) => (
-          <ResultRow key={r.id} item={r} sessions={sessions} onClick={() => jumpTo([r.id as TLShapeId])} />
+          <ResultRow key={r.id} item={r} sessions={sessions} onClick={() => jumpTo([r.id])} />
         ))}
         {!empty && results.length === 0 && <li className="d0-empty">No matches.</li>}
         {empty && index.length === 0 && <li className="d0-empty">Nothing here yet. Drop some screenshots onto the canvas.</li>}
@@ -207,7 +204,7 @@ function ResultRow({ item, sessions, onClick }: { item: SearchItem; sessions: Ch
         onClick={onClick}
         onDoubleClick={() => {
           onClick()
-          if (item.kind === 'card') ui.previewId.set(item.id)
+          if (item.kind === 'card') app.update({ previewId: item.id })
         }}
       >
         <span className={`d0-kind d0-kind--${item.kind}`}>{item.kind}</span>
@@ -238,9 +235,9 @@ function ResultRow({ item, sessions, onClick }: { item: SearchItem; sessions: Ch
 
 function SessionsView() {
   const editor = useEditor()
-  const sessions = useValue('sessions', () => getSessions(editor), [editor])
+  const sessions = useDoc((d) => d.sessions)
   const index = useIndex()
-  const selectionCount = useValue('sel count', () => editor.getSelectedShapeIds().length, [editor])
+  const selectionCount = useUi((u) => u.selectedIds.length)
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
   const [editing, setEditing] = useState<string | null>(null)
@@ -267,7 +264,7 @@ function SessionsView() {
   const add = () => {
     const n = name.trim() || guessSessionName(url) || `Session ${sessions.length + 1}`
     const s = createSession(editor, { name: n, url: url.trim() })
-    if (selectionCount) setSession(editor, editor.getSelectedShapeIds(), s.id)
+    if (selectionCount) setSession(editor, editor.getSelectedIds(), s.id)
     setName('')
     setUrl('')
   }
@@ -334,8 +331,8 @@ function SessionRow({ session, count, selectionCount, onEdit }: { session: ChatS
   const jumpTo = useJumpTo()
   const idsFor = () =>
     editor
-      .getCurrentPageShapes()
-      .filter((s) => (isCard(s) ? s.props.sessionId : s.meta?.sessionId) === session.id)
+      .getShapes()
+      .filter((s) => s.sessionId === session.id)
       .map((s) => s.id)
   return (
     <div className="d0-session">
@@ -360,7 +357,7 @@ function SessionRow({ session, count, selectionCount, onEdit }: { session: ChatS
             Open chat
           </a>
         )}
-        <button className="d0-link-btn" disabled={!selectionCount} onClick={() => setSession(editor, editor.getSelectedShapeIds(), session.id)}>
+        <button className="d0-link-btn" disabled={!selectionCount} onClick={() => setSession(editor, editor.getSelectedIds(), session.id)}>
           Assign {selectionCount || ''}
         </button>
         <button
@@ -369,8 +366,7 @@ function SessionRow({ session, count, selectionCount, onEdit }: { session: ChatS
           onClick={() => {
             const ids = idsFor().filter((id) => editor.getShape(id)?.type !== 'frame')
             if (!ids.length) return
-            editor.markHistoryStoppingPoint('frame session')
-            const frameId = frameShapes(editor, ids, session.name)
+            const frameId = editor.frameShapes(ids, session.name)
             if (frameId) {
               setSession(editor, [frameId], session.id)
               jumpTo([frameId])

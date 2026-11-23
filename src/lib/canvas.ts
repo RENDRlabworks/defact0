@@ -1,135 +1,28 @@
-import { Box as TlBox, createShapeId, type Editor, type TLShape, type TLShapeId } from 'tldraw'
-import { CARD_TYPE, type CardShape } from '../shapes/cardTypes'
-import { cardSizeForText } from '../shapes/CardShapeUtil'
+import type { Editor } from '../engine/Editor'
+import { CARD_HEADER_H } from '../engine/render/ShapeViews'
+import type { AssetMeta, Shape, Vec } from '../engine/types'
 import type { SearchItem } from './search'
 import { normalizeTag } from './search'
 
-export function isCard(shape: TLShape | undefined | null): shape is CardShape {
-  return !!shape && shape.type === CARD_TYPE
+export const CARD_MAX_W = 520
+
+/** Size a new image card so the image fits inside CARD_MAX_W while keeping its aspect ratio. */
+export function cardSizeForImage(imgW: number, imgH: number): { w: number; h: number } {
+  const w0 = Math.max(1, imgW)
+  const h0 = Math.max(1, imgH)
+  const scale = Math.min(1, CARD_MAX_W / w0, 640 / h0)
+  const w = Math.max(160, Math.round(w0 * scale))
+  return { w, h: Math.round((w / w0) * h0) + CARD_HEADER_H }
 }
 
-/** Tags live in card props, and in `meta.tags` for every other shape type. */
-export function getTags(shape: TLShape): string[] {
-  if (isCard(shape)) return shape.props.tags
-  const t = shape.meta?.tags
-  return Array.isArray(t) ? (t as string[]) : []
-}
-
-export function getSessionId(shape: TLShape): string {
-  if (isCard(shape)) return shape.props.sessionId
-  return typeof shape.meta?.sessionId === 'string' ? (shape.meta.sessionId as string) : ''
-}
-
-export function getCreatedAt(shape: TLShape): number {
-  if (isCard(shape)) return shape.props.createdAt
-  return typeof shape.meta?.createdAt === 'number' ? (shape.meta.createdAt as number) : 0
-}
-
-function kindOf(shape: TLShape): SearchItem['kind'] {
-  if (isCard(shape)) return 'card'
-  if (shape.type === 'note') return 'note'
-  if (shape.type === 'text') return 'text'
-  if (shape.type === 'frame') return 'frame'
-  return 'other'
-}
-
-/** Flatten every shape on the current page into search items. */
-export function buildIndex(editor: Editor): SearchItem[] {
-  const items: SearchItem[] = []
-  for (const shape of editor.getCurrentPageShapes()) {
-    if (shape.type === 'group' || shape.type === 'draw' || shape.type === 'highlight') continue
-    let title = ''
-    let text = ''
-    if (isCard(shape)) {
-      title = shape.props.title
-      text = shape.props.text
-    } else if (shape.type === 'frame') {
-      title = shape.props.name || 'Frame'
-    } else {
-      text = editor.getShapeUtil(shape).getText(shape) ?? ''
-      title = text.split('\n')[0]?.slice(0, 60) ?? ''
-    }
-    const tags = getTags(shape)
-    if (!title && !text && !tags.length && !isCard(shape)) continue
-    items.push({
-      id: shape.id,
-      kind: kindOf(shape),
-      title,
-      text,
-      tags,
-      sessionId: getSessionId(shape),
-      createdAt: getCreatedAt(shape),
-    })
-  }
-  return items
-}
-
-export function setTags(editor: Editor, ids: TLShapeId[], update: (tags: string[]) => string[]) {
-  editor.markHistoryStoppingPoint('set tags')
-  editor.run(() => {
-    for (const id of ids) {
-      const shape = editor.getShape(id)
-      if (!shape) continue
-      const next = [...new Set(update(getTags(shape)).map(normalizeTag).filter(Boolean))]
-      if (isCard(shape)) {
-        editor.updateShape<CardShape>({ id, type: CARD_TYPE, props: { tags: next } })
-      } else {
-        editor.updateShape({ id, type: shape.type, meta: { ...shape.meta, tags: next } })
-      }
-    }
-  })
-}
-
-export function setSession(editor: Editor, ids: TLShapeId[], sessionId: string) {
-  editor.markHistoryStoppingPoint('set session')
-  editor.run(() => {
-    for (const id of ids) {
-      const shape = editor.getShape(id)
-      if (!shape) continue
-      if (isCard(shape)) editor.updateShape<CardShape>({ id, type: CARD_TYPE, props: { sessionId } })
-      else editor.updateShape({ id, type: shape.type, meta: { ...shape.meta, sessionId } })
-      // Tag the frame's children too, so jumping to a session finds everything in it.
-      if (shape.type === 'frame') setSessionSilently(editor, editor.getSortedChildIdsForParent(id), sessionId)
-    }
-  })
-}
-
-function setSessionSilently(editor: Editor, ids: TLShapeId[], sessionId: string) {
-  for (const id of ids) {
-    const shape = editor.getShape(id)
-    if (isCard(shape)) editor.updateShape<CardShape>({ id, type: CARD_TYPE, props: { sessionId } })
-  }
-}
-
-/** Shapes that are top-level (or inside frames) and can be arranged. */
-export function arrangeableShapes(editor: Editor, ids: TLShapeId[]): TLShape[] {
-  return ids
-    .map((id) => editor.getShape(id))
-    .filter((s): s is TLShape => !!s && s.type !== 'arrow')
-}
-
-export function pageBoundsOf(editor: Editor, ids: TLShapeId[]): TlBox | null {
-  const boxes = ids.map((id) => editor.getShapePageBounds(id)).filter((b): b is TlBox => !!b)
-  return boxes.length ? TlBox.Common(boxes) : null
-}
-
-/** Wrap shapes in a new named frame (with padding) and return its id. */
-export function frameShapes(editor: Editor, ids: TLShapeId[], name: string, padding = 48): TLShapeId | null {
-  const bounds = pageBoundsOf(editor, ids)
-  if (!bounds) return null
-  const frameId = createShapeId()
-  editor.run(() => {
-    editor.createShape({
-      id: frameId,
-      type: 'frame',
-      x: bounds.x - padding,
-      y: bounds.y - padding - 8,
-      props: { w: bounds.w + padding * 2, h: bounds.h + padding * 2 + 8, name },
-    })
-    editor.reparentShapes(ids, frameId)
-    editor.sendToBack([frameId])
-  })
-  return frameId
+/** Size a new text-only card based on its line count. */
+export function cardSizeForText(text: string): { w: number; h: number } {
+  const lines = text.split('\n')
+  const longest = lines.reduce((m, l) => Math.max(m, l.length), 0)
+  const w = Math.min(CARD_MAX_W, Math.max(260, longest * 7.4 + 32))
+  const wrapped = lines.reduce((n, l) => n + Math.max(1, Math.ceil((l.length * 7.4) / (w - 24))), 0)
+  const h = Math.min(560, Math.max(110, wrapped * 18 + CARD_HEADER_H + 28))
+  return { w: Math.round(w), h: Math.round(h) }
 }
 
 export interface NewCardInput {
@@ -141,31 +34,72 @@ export interface NewCardInput {
 }
 
 /** Create a text card centered on a page point. */
-export function createTextCard(editor: Editor, point: { x: number; y: number }, input: NewCardInput): TLShapeId {
-  const id = createShapeId()
+export function createTextCard(editor: Editor, point: Vec, input: NewCardInput): string {
   const { w, h } = cardSizeForText(input.text ?? '')
-  editor.createShape<CardShape>({
-    id,
-    type: CARD_TYPE,
+  const id = editor.createShape({
+    type: 'card',
     x: point.x - w / 2,
     y: point.y - h / 2,
-    props: {
-      w,
-      h,
-      title: input.title ?? '',
-      text: input.text ?? '',
-      isCode: input.isCode ?? false,
-      language: input.language ?? '',
-      tags: input.tags ?? [],
-      createdAt: Date.now(),
-    },
+    w,
+    h,
+    title: input.title ?? '',
+    text: input.text ?? '',
+    isCode: input.isCode ?? false,
+    language: input.language ?? '',
+    tags: input.tags ?? [],
   })
+  editor.reparent([id])
   return id
 }
 
-/** Every image asset id used by these shapes (cards and plain image shapes). */
-export function imageAssetIdOf(shape: TLShape): string | null {
-  if (isCard(shape)) return shape.props.assetId
-  if (shape.type === 'image') return shape.props.assetId
-  return null
+export function createImageCard(editor: Editor, asset: AssetMeta, topLeft: Vec): string {
+  const { w, h } = cardSizeForImage(asset.w, asset.h)
+  return editor.createShape({
+    type: 'card',
+    x: topLeft.x,
+    y: topLeft.y,
+    w,
+    h,
+    assetId: asset.id,
+    title: asset.name.replace(/\.[a-z0-9]{2,5}$/i, '') || 'Screenshot',
+  })
+}
+
+export function shapeText(s: Shape): { title: string; text: string } {
+  switch (s.type) {
+    case 'card':
+      return { title: s.title, text: s.text }
+    case 'note':
+      return { title: s.text.split('\n')[0].slice(0, 60), text: s.text }
+    case 'frame':
+      return { title: s.name || 'Frame', text: '' }
+    case 'draw':
+      return { title: 'Drawing', text: '' }
+  }
+}
+
+/** Flatten every shape into search items. Drawings only show up when tagged. */
+export function buildIndex(editor: Editor): SearchItem[] {
+  const items: SearchItem[] = []
+  for (const s of editor.getShapes()) {
+    if (s.type === 'draw' && !s.tags.length) continue
+    const { title, text } = shapeText(s)
+    if (s.type === 'note' && !text && !s.tags.length) continue
+    items.push({ id: s.id, kind: s.type === 'draw' ? 'other' : s.type, title, text, tags: s.tags, sessionId: s.sessionId, createdAt: s.createdAt })
+  }
+  return items
+}
+
+export function setTags(editor: Editor, ids: string[], update: (tags: string[]) => string[]) {
+  editor.updateShapes(
+    ids
+      .map((id) => editor.getShape(id))
+      .filter((s): s is Shape => !!s)
+      .map((s) => ({ id: s.id, tags: [...new Set(update(s.tags).map(normalizeTag).filter(Boolean))] }))
+  )
+}
+
+/** Assign shapes (and the contents of any frames among them) to a chat session. */
+export function setSession(editor: Editor, ids: string[], sessionId: string) {
+  editor.updateShapes(editor.withChildren(ids).map((id) => ({ id, sessionId })))
 }

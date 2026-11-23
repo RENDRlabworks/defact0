@@ -1,4 +1,4 @@
-/** Pure layout helpers. Kept free of tldraw imports so they are easy to unit test. */
+/** Pure layout helpers. Free of DOM and editor imports so they are easy to unit test. */
 
 export interface Box {
   id: string

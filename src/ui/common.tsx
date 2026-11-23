@@ -1,5 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
-import { stopEventPropagation, useEditor, type TLShapeId } from 'tldraw'
+import { useEditor } from '../engine/react'
+
+const stopEventPropagation = (e: { stopPropagation(): void }) => e.stopPropagation()
 
 /** Stop pointer/wheel/key events from reaching the canvas underneath. */
 export const shield = {
@@ -11,10 +13,7 @@ export const shield = {
   onDoubleClick: stopEventPropagation,
 }
 
-/**
- * A modal dialog. While open, the editor is blurred so tldraw shortcuts (Delete, etc.)
- * can't fire on the canvas selection behind it.
- */
+/** A modal dialog. Canvas shortcuts are suspended while any modal is open (see isModalOpen). */
 export function Modal({
   title,
   onClose,
@@ -28,20 +27,15 @@ export function Modal({
   wide?: boolean
   footer?: ReactNode
 }) {
-  const editor = useEditor()
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    editor.blur()
     const root = ref.current
     const first =
       root?.querySelector<HTMLElement>('.d0-modal__body [data-autofocus]') ??
       root?.querySelector<HTMLElement>('.d0-modal__body input, .d0-modal__body textarea, .d0-modal__body select') ??
       root?.querySelector<HTMLElement>('[data-autofocus], input, textarea')
     first?.focus()
-    return () => {
-      editor.focus()
-    }
-  }, [editor])
+  }, [])
   return (
     <div
       className="d0-modal-backdrop"
@@ -82,11 +76,11 @@ export function formatDate(ms: number) {
 /** Select shapes and fly the camera to them. */
 export function useJumpTo() {
   const editor = useEditor()
-  return (ids: TLShapeId[]) => {
+  return (ids: string[]) => {
     const existing = ids.filter((id) => editor.getShape(id))
     if (!existing.length) return
-    editor.setCurrentTool('select')
-    editor.select(...existing)
-    editor.zoomToSelection({ animation: { duration: 320 } })
+    editor.setTool('select')
+    editor.select(existing)
+    editor.zoomToSelection()
   }
 }

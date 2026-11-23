@@ -1,40 +1,35 @@
 import { useMemo, useState } from 'react'
-import { useEditor, useValue, type TLShapeId } from 'tldraw'
+import { useDoc, useEditor } from '../engine/react'
+import type { Shape } from '../engine/types'
 import { gridLayout } from '../lib/arrange'
-import { buildIndex, frameShapes, getTags, setSession, setTags } from '../lib/canvas'
+import { buildIndex, setSession, setTags } from '../lib/canvas'
 import { planOrganize } from '../lib/organize'
 import { parseTags, tagCounts } from '../lib/search'
-import { createSession, getSessions, guessSessionName, sessionColor } from '../lib/sessions'
-import { ui } from '../lib/uiState'
+import { createSession, guessSessionName, sessionColor } from '../lib/sessions'
+import { app, useApp } from '../lib/uiState'
+import { ShortcutsDialog } from './Chrome'
 import { Modal, useJumpTo } from './common'
 
 export function Dialogs() {
-  const tag = useValue('tagDialog', () => ui.tagDialog.get(), [])
-  const org = useValue('organizeDialog', () => ui.organizeDialog.get(), [])
-  const ses = useValue('sessionDialog', () => ui.sessionDialog.get(), [])
-  return (
-    <>
-      {tag && <TagDialog onClose={() => ui.tagDialog.set(false)} />}
-      {org && <OrganizeDialog onClose={() => ui.organizeDialog.set(false)} />}
-      {ses && <AssignSessionDialog onClose={() => ui.sessionDialog.set(false)} />}
-    </>
-  )
+  const dialog = useApp((s) => s.dialog)
+  const close = () => app.update({ dialog: null })
+  if (dialog === 'tag') return <TagDialog onClose={close} />
+  if (dialog === 'organize') return <OrganizeDialog onClose={close} />
+  if (dialog === 'session') return <AssignSessionDialog onClose={close} />
+  if (dialog === 'shortcuts') return <ShortcutsDialog onClose={close} />
+  return null
 }
 
 /* -------------------------------- Tags -------------------------------- */
 
 function TagDialog({ onClose }: { onClose(): void }) {
   const editor = useEditor()
-  const ids = useMemo(() => editor.getSelectedShapeIds(), [editor])
-  const current = useValue(
-    'sel tags',
-    () => {
-      const all = ids.map((id) => editor.getShape(id)).filter(Boolean).map((s) => getTags(s!))
-      const union = [...new Set(all.flat())]
-      return union.map((t) => ({ tag: t, all: all.every((list) => list.includes(t)) }))
-    },
-    [editor, ids]
-  )
+  const ids = useMemo(() => editor.getSelectedIds(), [editor])
+  const shapes = useDoc((d) => ids.map((id) => d.shapes[id]).filter((s): s is Shape => !!s))
+  const current = useMemo(() => {
+    const all = shapes.map((s) => s.tags)
+    return [...new Set(all.flat())].map((t) => ({ tag: t, all: all.every((list) => list.includes(t)) }))
+  }, [shapes])
   const known = useMemo(() => tagCounts(buildIndex(editor)).map((t) => t.tag), [editor])
   const [input, setInput] = useState('')
   const add = (tags: string[]) => {
@@ -96,8 +91,8 @@ function TagDialog({ onClose }: { onClose(): void }) {
 
 function AssignSessionDialog({ onClose }: { onClose(): void }) {
   const editor = useEditor()
-  const ids = useMemo(() => editor.getSelectedShapeIds(), [editor])
-  const sessions = useValue('sessions', () => getSessions(editor), [editor])
+  const ids = useMemo(() => editor.getSelectedIds(), [editor])
+  const sessions = useDoc((d) => d.sessions)
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
   const assign = (id: string) => {
@@ -158,29 +153,26 @@ function OrganizeDialog({ onClose }: { onClose(): void }) {
   const plan = useMemo(() => planOrganize(instruction, index), [instruction, index])
 
   const run = () => {
-    const ids = plan.ids as TLShapeId[]
+    const ids = plan.ids
     if (!ids.length) return
-    editor.markHistoryStoppingPoint('ai organize')
     // Lay matches out in a grid to the right of everything, then wrap them in a frame.
-    const pageBounds = editor.getCurrentPageBounds()
-    const origin = pageBounds ? { x: pageBounds.maxX + 240, y: pageBounds.minY } : editor.getViewportPageBounds().center
-    let frameId: TLShapeId | null = null
+    let frameId: string | null = null
+    const content = editor.getContentBounds()
+    const origin = content ? { x: content.x + content.w + 240, y: content.y } : editor.getViewportCenter()
     editor.run(() => {
       const boxes = ids.map((id) => {
-        const b = editor.getShapePageBounds(id)!
-        return { id: id as string, w: b.w, h: b.h }
+        const b = editor.getBounds(id)!
+        return { id, w: b.w, h: b.h }
       })
       const placements = gridLayout(boxes, origin, { gap: 32, columns: Math.min(4, Math.ceil(Math.sqrt(ids.length))) })
-      // Pull matches out of any existing frames first so they move in page space.
-      editor.reparentShapes(ids, editor.getCurrentPageId())
       editor.updateShapes(
         placements.map((p) => {
-          const shape = editor.getShape(p.id as TLShapeId)!
-          const b = editor.getShapePageBounds(shape.id)!
-          return { id: shape.id, type: shape.type, x: shape.x + (p.x - b.x), y: shape.y + (p.y - b.y) }
+          const shape = editor.getShape(p.id)!
+          const b = editor.getBounds(p.id)!
+          return { id: p.id, x: shape.x + (p.x - b.x), y: shape.y + (p.y - b.y), parentId: null }
         })
       )
-      frameId = frameShapes(editor, ids, plan.frameName)
+      frameId = editor.frameShapes(ids, plan.frameName)
     })
     onClose()
     if (frameId) jumpTo([frameId])
